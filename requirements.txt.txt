@@ -1,0 +1,7 @@
+PyQt5
+mss
+Pillow
+google-cloud-vision
+google-cloud-translate
+google-auth
+keyboard
