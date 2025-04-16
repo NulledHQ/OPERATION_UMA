@@ -12,12 +12,13 @@ MIN_WINDOW_HEIGHT = 100
 RESIZE_MARGIN = 10
 DEFAULT_TARGET_LANGUAGE_CODE = "en" # Default target language for TRANSLATION
 DEFAULT_OCR_LANGUAGE = "eng" # Default language for OCR (using OCR.space codes)
+DEFAULT_HOTKEY = 'ctrl+shift+g' # <<< Define default hotkey here
 DEFAULT_WINDOW_GEOMETRY = None # Default to None, let Qt decide initially
 MAX_HISTORY_ITEMS = 20 # How many OCR results to store in history
 HISTORY_FILENAME = "ocr_translator_history.json" # Filename for history persistence
 
 # --- Hotkey ---
-HOTKEY = 'ctrl+shift+g'
+# HOTKEY = 'ctrl+shift+g' # <<< Remove this old hardcoded value
 
 # --- Common Language Codes for TRANSLATION Selection ---
 # List of tuples: (Display Name, ISO 639-1 Code)
@@ -79,6 +80,7 @@ SETTINGS_FONT_KEY = "displayFont"
 SETTINGS_WINDOW_LOCKED_KEY = "windowLocked"
 SETTINGS_OCR_INTERVAL_KEY = "ocrInterval"
 SETTINGS_BG_COLOR_KEY = "backgroundColor"
+SETTINGS_HOTKEY_KEY = "captureHotkey" # <<< ADD THIS KEY
 # OCR Provider Settings
 SETTINGS_OCR_PROVIDER_KEY = "ocrProvider"
 SETTINGS_GOOGLE_CREDENTIALS_PATH_KEY = "googleCredentialsPath"
@@ -119,6 +121,8 @@ TOOLTIP_DEEPL_KEY = ("Enter your DeepL API Authentication Key (Free or Pro).\n"
                    "Get a key from deepl.com.")
 TOOLTIP_ENGINE_SELECT = "Select the translation service to use."
 TOOLTIP_TARGET_LANGUAGE_SELECT = "Select the language to translate the recognized text INTO."
+TOOLTIP_HOTKEY_INPUT = ("Click here, then press the desired key combination (e.g., Ctrl+Shift+X).\n"
+                      "Uses 'keyboard' library format. Mouse buttons not supported.") # <<< ADD THIS TOOLTIP
 
 
 # --- OCR.space API ---

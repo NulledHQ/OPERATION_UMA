@@ -11,11 +11,13 @@ from PyQt5.QtGui import QFont, QColor
 
 # Use absolute import from src package root
 from src import config
+from src.gui.hotkey_edit import HotkeyEdit # <<< IMPORT THE NEW WIDGET
 
 class SettingsDialog(QDialog):
     """
     A dialog window for configuring application settings.
     Dynamically shows/hides API key/credential fields based on provider/engine selection.
+    Includes an input for changing the global hotkey.
     """
     def __init__(self, parent=None, current_settings=None):
         """
@@ -44,12 +46,13 @@ class SettingsDialog(QDialog):
             'bg_alpha': self.current_settings.get('bg_color', QColor(config.DEFAULT_BG_COLOR)).alpha(),
             'ocr_interval': self.current_settings.get('ocr_interval', config.DEFAULT_OCR_INTERVAL_SECONDS),
             'is_locked': self.current_settings.get('is_locked', False),
+            'hotkey': self.current_settings.get('hotkey', config.DEFAULT_HOTKEY), # <<< ADD HOTKEY
         }
         # Store the original bg_color object separately if needed for reference
         self.original_bg_color = self.current_settings.get('bg_color', QColor(config.DEFAULT_BG_COLOR))
 
         self.setWindowTitle("Settings")
-        self.setMinimumWidth(450)
+        self.setMinimumWidth(450) # May need adjustment for hotkey input
 
         # --- Setup UI Elements ---
         self._setup_widgets()
@@ -133,6 +136,11 @@ class SettingsDialog(QDialog):
         self.interval_spinbox = QSpinBox(self); self.interval_spinbox.setRange(1, 300); self.interval_spinbox.setSuffix(" s")
         self.interval_spinbox.setToolTip("Set refresh interval (seconds) for Live Mode.")
 
+        # Hotkey Section (NEW)
+        self.hotkey_label = QLabel("Capture Hotkey:")
+        self.hotkey_edit = HotkeyEdit(parent=self) # <<< CREATE HOTKEY WIDGET
+        self.hotkey_edit.setToolTip(config.TOOLTIP_HOTKEY_INPUT) # Use tooltip from config
+
         self.lock_checkbox = QCheckBox("Lock Window Position/Size"); self.lock_checkbox.setToolTip("Prevent moving or resizing.")
 
         # History Section
@@ -171,6 +179,9 @@ class SettingsDialog(QDialog):
 
         # Interval Row
         form_layout.addRow(self.interval_label, self.interval_spinbox)
+
+        # Hotkey Row (NEW)
+        form_layout.addRow(self.hotkey_label, self.hotkey_edit) # <<< ADD HOTKEY ROW
 
         # Add Form and Checkbox
         main_layout.addLayout(form_layout)
@@ -211,6 +222,7 @@ class SettingsDialog(QDialog):
         self.font_button.clicked.connect(self._change_font)
         self.bg_alpha_slider.valueChanged.connect(self._update_alpha)
         self.interval_spinbox.valueChanged.connect(self._update_interval)
+        self.hotkey_edit.hotkeyChanged.connect(self._update_hotkey) # <<< CONNECT HOTKEY WIDGET
         self.lock_checkbox.stateChanged.connect(self._update_lock_status)
 
         # Connect history buttons to parent window methods (if available)
@@ -275,16 +287,23 @@ class SettingsDialog(QDialog):
 
         # Background Alpha
         current_alpha = self.new_settings.get('bg_alpha', QColor(config.DEFAULT_BG_COLOR).alpha())
+        if not isinstance(current_alpha, int): current_alpha = QColor(config.DEFAULT_BG_COLOR).alpha() # Ensure int
         self.bg_alpha_slider.setValue(current_alpha)
         self.bg_alpha_value_label.setText(str(current_alpha))
 
         # OCR Interval
         current_interval = self.new_settings.get('ocr_interval', config.DEFAULT_OCR_INTERVAL_SECONDS)
+        if not isinstance(current_interval, int): current_interval = config.DEFAULT_OCR_INTERVAL_SECONDS # Ensure int
         self.interval_spinbox.setValue(current_interval)
 
         # Lock Status
         current_lock_status = self.new_settings.get('is_locked', False)
         self.lock_checkbox.setChecked(current_lock_status)
+
+        # Hotkey (NEW)
+        current_hotkey = self.new_settings.get('hotkey', config.DEFAULT_HOTKEY)
+        if not isinstance(current_hotkey, str): current_hotkey = config.DEFAULT_HOTKEY # Ensure string
+        self.hotkey_edit.setHotkey(current_hotkey) # <<< LOAD HOTKEY
 
         # Update history button enabled state
         self._update_history_button_states()
@@ -299,7 +318,7 @@ class SettingsDialog(QDialog):
             hasattr(self.parent_window, 'history_manager') and
             self.parent_window.history_manager and
             self.parent_window.history_manager.history_deque):
-            history_exists = True
+            history_exists = bool(self.parent_window.history_manager.history_deque) # Check if deque is not empty
 
         can_export = hasattr(self.parent_window, 'export_history') and callable(self.parent_window.export_history)
         self.history_export_button.setEnabled(can_export and history_exists)
@@ -366,33 +385,49 @@ class SettingsDialog(QDialog):
         is_google_vision = (selected_ocr_key == "google_vision")
         is_ocr_space = (selected_ocr_key == "ocr_space")
 
-        self.google_credentials_label.setVisible(is_google_vision)
-        self.google_credentials_widget.setVisible(is_google_vision)
+        # Set default visibility
+        self.google_credentials_label.setVisible(False)
+        self.google_credentials_widget.setVisible(False)
+        self.ocrspace_key_label.setVisible(False)
+        self.ocrspace_key_widget.setVisible(False)
+        self.ocr_language_label.setVisible(False) # <<< Show/Hide OCR Lang
+        self.ocr_language_combo.setVisible(False) # <<< Show/Hide OCR Lang Combo
+        self.deepl_key_label.setVisible(False)
+        self.deepl_key_widget.setVisible(False)
 
-        self.ocrspace_key_label.setVisible(is_ocr_space)
-        self.ocrspace_key_widget.setVisible(is_ocr_space)
-        self.ocr_language_label.setVisible(is_ocr_space) # <<< Show/Hide OCR Lang
-        self.ocr_language_combo.setVisible(is_ocr_space) # <<< Show/Hide OCR Lang Combo
+        # Update based on OCR selection
+        if is_google_vision:
+            self.google_credentials_label.setVisible(True)
+            self.google_credentials_widget.setVisible(True)
+        elif is_ocr_space:
+            self.ocrspace_key_label.setVisible(True)
+            self.ocrspace_key_widget.setVisible(True)
+            self.ocr_language_label.setVisible(True)
+            self.ocr_language_combo.setVisible(True)
 
-        # Translation Engine Visibility
+        # Update based on Translation selection
         is_deepl = (selected_trans_key == "deepl_free")
         is_google_cloud_trans = (selected_trans_key == "google_cloud_v3")
-        self.deepl_key_label.setVisible(is_deepl)
-        self.deepl_key_widget.setVisible(is_deepl)
 
-        # Conditionally show Google Credentials label again if Google Cloud Translate is chosen
-        # but Google Vision OCR is *not* chosen (since Translate still needs creds)
-        # Make sure Google Credentials row is visible if EITHER is true
-        google_needed = is_google_vision or is_google_cloud_trans
-        self.google_credentials_label.setVisible(google_needed)
-        self.google_credentials_widget.setVisible(google_needed)
-        # Adjust label text based on why it's needed
-        if is_google_vision and is_google_cloud_trans:
-             self.google_credentials_label.setText("Google Credentials (OCR & Translate):")
-        elif is_google_vision:
-             self.google_credentials_label.setText("Google Credentials (for OCR):")
+        if is_deepl:
+             self.deepl_key_label.setVisible(True)
+             self.deepl_key_widget.setVisible(True)
         elif is_google_cloud_trans:
+             # Ensure Google credentials row is visible if Translate needs it,
+             # even if Google Vision OCR wasn't selected.
+             self.google_credentials_label.setVisible(True)
+             self.google_credentials_widget.setVisible(True)
+
+        # Adjust Google Credentials label text based on why it's needed
+        google_needed_for_ocr = is_google_vision
+        google_needed_for_trans = is_google_cloud_trans
+        if google_needed_for_ocr and google_needed_for_trans:
+             self.google_credentials_label.setText("Google Credentials (OCR & Translate):")
+        elif google_needed_for_ocr:
+             self.google_credentials_label.setText("Google Credentials (for OCR):")
+        elif google_needed_for_trans:
               self.google_credentials_label.setText("Google Credentials (for Translate):")
+        # If only OCR.space/DeepL etc. selected, the label remains hidden by default.
 
 
     def _update_language(self, index): # <<< Renamed from _update_language to be specific
@@ -403,6 +438,7 @@ class SettingsDialog(QDialog):
     def _change_font(self):
         """Open font dialog and update font settings."""
         current_font = self.new_settings.get('display_font', QFont())
+        if not isinstance(current_font, QFont): current_font = QFont() # Ensure valid font object
         font, ok = QFontDialog.getFont(current_font, self, "Select Display Font")
         if ok:
              self.new_settings['display_font'] = font
@@ -418,6 +454,12 @@ class SettingsDialog(QDialog):
         """Update OCR interval in new_settings."""
         self.new_settings['ocr_interval'] = value
 
+    def _update_hotkey(self, hotkey_str): # <<< NEW SLOT
+        """Update hotkey in new_settings when the widget emits change."""
+        self.new_settings['hotkey'] = hotkey_str
+        logging.debug(f"SettingsDialog updated hotkey to: {hotkey_str}")
+
+
     def _update_lock_status(self, state):
         """Update lock status in new_settings."""
         self.new_settings['is_locked'] = (state == Qt.Checked)
@@ -425,8 +467,8 @@ class SettingsDialog(QDialog):
     def _confirm_clear_history(self):
         """Show confirmation dialog before calling parent's clear_history."""
         if self.parent_window and hasattr(self.parent_window, 'clear_history'):
-             self.parent_window.clear_history()
-             self._update_history_button_states()
+             self.parent_window.clear_history() # Parent method handles confirmation
+             self._update_history_button_states() # Refresh button state after clear
 
 
     # --- Get Final Settings ---
@@ -447,8 +489,6 @@ class SettingsDialog(QDialog):
         google_needed = selected_ocr == 'google_vision' or selected_trans == 'google_cloud_v3'
         if google_needed:
             if not google_cred_path:
-                ocr_name = config.AVAILABLE_OCR_PROVIDERS.get(selected_ocr, selected_ocr)
-                trans_name = config.AVAILABLE_ENGINES.get(selected_trans, selected_trans)
                 reason = f"Google Cloud Vision OCR" if selected_ocr == 'google_vision' else f"Google Cloud Translate Engine"
                 if selected_ocr == 'google_vision' and selected_trans == 'google_cloud_v3':
                      reason = "Google Cloud Vision OCR and Translate Engine"
@@ -468,6 +508,13 @@ class SettingsDialog(QDialog):
         if selected_trans == 'deepl_free' and not self.new_settings.get('deepl_api_key'):
             QMessageBox.warning(self, "API Key Required", "DeepL engine requires an API Key. Please enter one or select a different translation engine.")
             return # Keep dialog open
+
+        # Validate hotkey
+        hotkey = self.new_settings.get('hotkey')
+        if not hotkey:
+            QMessageBox.warning(self, "Hotkey Required", "Please set a capture hotkey.")
+            return # Keep dialog open
+
 
         # --- End Validation ---
         super().accept() # Call parent accept if validation passes

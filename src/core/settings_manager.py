@@ -60,16 +60,19 @@ class SettingsManager:
         # Load font safely
         font_str = self.settings.value(config.SETTINGS_FONT_KEY, None)
         display_font = QFont()
-        if font_str and not display_font.fromString(font_str):
-            logging.warning(f"Failed loading font from stored string: '{font_str}'. Using default.")
-            display_font = QFont() # Reset
+        if font_str and isinstance(font_str, str) and not display_font.fromString(font_str):
+             logging.warning(f"Failed loading font from stored string: '{font_str}'. Using default.")
+             display_font = QFont() # Reset
+        elif not isinstance(font_str, str): # Handle case where it's not a string
+             display_font = QFont() # Use default if stored value isn't a string
         loaded_settings['display_font'] = display_font
+
 
         # Load interval safely
         try:
             interval_val = self.settings.value(config.SETTINGS_OCR_INTERVAL_KEY, config.DEFAULT_OCR_INTERVAL_SECONDS)
             ocr_interval = int(interval_val)
-            if ocr_interval <= 0: raise ValueError()
+            if ocr_interval <= 0: raise ValueError("Interval must be positive")
         except (ValueError, TypeError):
             logging.warning(f"Invalid OCR interval loaded ('{interval_val}'). Using default.")
             ocr_interval = config.DEFAULT_OCR_INTERVAL_SECONDS
@@ -87,6 +90,12 @@ class SettingsManager:
         loaded_settings['saved_geometry'] = self.settings.value(config.SETTINGS_GEOMETRY_KEY, None)
         loaded_settings['is_locked'] = self.settings.value(config.SETTINGS_WINDOW_LOCKED_KEY, False, type=bool)
 
+        # Load Hotkey <<< NEW >>>
+        loaded_settings['hotkey'] = self.settings.value(
+            config.SETTINGS_HOTKEY_KEY,
+            config.DEFAULT_HOTKEY # Use the new default from config
+        )
+
         logging.debug(f"Settings loaded by SettingsManager: {list(loaded_settings.keys())}")
         return loaded_settings
 
@@ -94,7 +103,9 @@ class SettingsManager:
         """Saves a single setting, handling None to remove."""
         log_val = str(value)[:50] + "..." if value and len(str(value)) > 50 else str(value)
         # Avoid logging sensitive keys like API keys directly
-        if "key" in key.lower() or "credential" in key.lower():
+        sensitive_keys = ["key", "credential", "token"]
+        is_sensitive = any(k in key.lower() for k in sensitive_keys)
+        if is_sensitive:
             log_val = "****" if value else "None"
         logging.debug(f"Saving setting via SettingsManager: {key} = {log_val}")
 
@@ -102,7 +113,20 @@ class SettingsManager:
             self.settings.remove(key)
             logging.debug(f"Removed setting: {key}")
         else:
-            self.settings.setValue(key, value)
+            # Ensure value types are suitable for QSettings
+            if isinstance(value, QColor):
+                value_to_save = value.name(QColor.HexArgb)
+            elif isinstance(value, QFont):
+                value_to_save = value.toString()
+            elif isinstance(value, QByteArray):
+                 value_to_save = value # Already suitable
+            elif isinstance(value, (str, int, float, bool, list, dict)):
+                 value_to_save = value # Standard types
+            else:
+                 logging.warning(f"Attempting to save unsupported type for key '{key}': {type(value)}. Converting to string.")
+                 value_to_save = str(value)
+            self.settings.setValue(key, value_to_save)
+
 
     def save_all_settings(self, settings_dict: dict, current_geometry: QByteArray):
         """Saves all relevant settings from a dictionary and current geometry."""
@@ -123,15 +147,13 @@ class SettingsManager:
         self.save_setting(config.SETTINGS_TRANSLATION_ENGINE_KEY, settings_dict.get('translation_engine_key'))
 
         # Save UI / Behavior settings
-        font = settings_dict.get('display_font')
-        self.save_setting(config.SETTINGS_FONT_KEY, font.toString() if isinstance(font, QFont) else None)
-
+        self.save_setting(config.SETTINGS_FONT_KEY, settings_dict.get('display_font'))
         self.save_setting(config.SETTINGS_OCR_INTERVAL_KEY, settings_dict.get('ocr_interval'))
-
-        bg_color = settings_dict.get('bg_color')
-        self.save_setting(config.SETTINGS_BG_COLOR_KEY, bg_color.name(QColor.HexArgb) if isinstance(bg_color, QColor) else None)
-
+        self.save_setting(config.SETTINGS_BG_COLOR_KEY, settings_dict.get('bg_color'))
         self.save_setting(config.SETTINGS_WINDOW_LOCKED_KEY, settings_dict.get('is_locked', False))
+        # Save Hotkey <<< NEW >>>
+        self.save_setting(config.SETTINGS_HOTKEY_KEY, settings_dict.get('hotkey', config.DEFAULT_HOTKEY))
+
 
         # Sync once after saving all settings
         self.settings.sync()
