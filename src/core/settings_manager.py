@@ -12,12 +12,6 @@ class SettingsManager:
 
     def __init__(self):
         """Initializes QSettings."""
-        # Ensure Org/App names are set (typically done in main.py before this)
-        # if not QCoreApplication.organizationName():
-        #     QCoreApplication.setOrganizationName(config.SETTINGS_ORG)
-        # if not QCoreApplication.applicationName():
-        #     QCoreApplication.setApplicationName(config.SETTINGS_APP)
-
         self.settings = QSettings(config.SETTINGS_ORG, config.SETTINGS_APP)
         logging.debug(f"SettingsManager initialized. Using QSettings backend: {self.settings.fileName()}")
 
@@ -27,18 +21,42 @@ class SettingsManager:
         loaded_settings = {}
 
         # --- Load individual settings with defaults ---
-        loaded_settings['credentials_path'] = self.settings.value(config.SETTINGS_CREDENTIALS_PATH_KEY, None)
+
+        # OCR Provider Settings
+        loaded_settings['ocr_provider'] = self.settings.value(
+            config.SETTINGS_OCR_PROVIDER_KEY,
+            config.DEFAULT_OCR_PROVIDER
+        )
+        if loaded_settings['ocr_provider'] not in config.AVAILABLE_OCR_PROVIDERS:
+            logging.warning(f"Saved OCR provider '{loaded_settings['ocr_provider']}' not found. Reverting to default '{config.DEFAULT_OCR_PROVIDER}'.")
+            loaded_settings['ocr_provider'] = config.DEFAULT_OCR_PROVIDER
+
+        loaded_settings['google_credentials_path'] = self.settings.value(config.SETTINGS_GOOGLE_CREDENTIALS_PATH_KEY, None)
+        loaded_settings['ocrspace_api_key'] = self.settings.value(config.SETTINGS_OCRSPACE_API_KEY, None)
+        # Load OCR Language (New)
+        loaded_settings['ocr_language_code'] = self.settings.value(
+            config.SETTINGS_OCR_LANGUAGE_KEY,
+            config.DEFAULT_OCR_LANGUAGE
+        )
+        # Basic validation if using OCR.space codes directly
+        if loaded_settings['ocr_provider'] == 'ocr_space' and loaded_settings['ocr_language_code'] not in config.OCR_SPACE_LANGUAGES:
+             logging.warning(f"Saved OCR language code '{loaded_settings['ocr_language_code']}' not found in config.OCR_SPACE_LANGUAGES. Reverting to default '{config.DEFAULT_OCR_LANGUAGE}'.")
+             loaded_settings['ocr_language_code'] = config.DEFAULT_OCR_LANGUAGE
+
+
+        # Translation Settings
         loaded_settings['deepl_api_key'] = self.settings.value(config.SETTINGS_DEEPL_API_KEY, None)
         loaded_settings['target_language_code'] = self.settings.value(config.SETTINGS_TARGET_LANG_KEY, config.DEFAULT_TARGET_LANGUAGE_CODE)
 
-        # Load and validate engine key
-        default_engine = config.DEFAULT_TRANSLATION_ENGINE
-        engine_key = self.settings.value(config.SETTINGS_TRANSLATION_ENGINE_KEY, default_engine)
-        if engine_key not in config.AVAILABLE_ENGINES:
-            logging.warning(f"Saved engine key '{engine_key}' not found. Reverting to default '{default_engine}'.")
-            engine_key = default_engine
-        loaded_settings['translation_engine_key'] = engine_key
+        # Load and validate translation engine key
+        default_trans_engine = config.DEFAULT_TRANSLATION_ENGINE
+        trans_engine_key = self.settings.value(config.SETTINGS_TRANSLATION_ENGINE_KEY, default_trans_engine)
+        if trans_engine_key not in config.AVAILABLE_ENGINES:
+            logging.warning(f"Saved translation engine key '{trans_engine_key}' not found. Reverting to default '{default_trans_engine}'.")
+            trans_engine_key = default_trans_engine
+        loaded_settings['translation_engine_key'] = trans_engine_key
 
+        # UI / Behavior Settings
         # Load font safely
         font_str = self.settings.value(config.SETTINGS_FONT_KEY, None)
         display_font = QFont()
@@ -74,14 +92,17 @@ class SettingsManager:
 
     def save_setting(self, key: str, value: any):
         """Saves a single setting, handling None to remove."""
-        logging.debug(f"Saving setting via SettingsManager: {key} = {str(value)[:50]}...") # Log truncated value
+        log_val = str(value)[:50] + "..." if value and len(str(value)) > 50 else str(value)
+        # Avoid logging sensitive keys like API keys directly
+        if "key" in key.lower() or "credential" in key.lower():
+            log_val = "****" if value else "None"
+        logging.debug(f"Saving setting via SettingsManager: {key} = {log_val}")
+
         if value is None:
             self.settings.remove(key)
             logging.debug(f"Removed setting: {key}")
         else:
             self.settings.setValue(key, value)
-        # Syncing after every single save might be slow, consider syncing once in save_all_settings
-        # self.settings.sync()
 
     def save_all_settings(self, settings_dict: dict, current_geometry: QByteArray):
         """Saves all relevant settings from a dictionary and current geometry."""
@@ -90,12 +111,18 @@ class SettingsManager:
         # Save geometry first
         self.save_setting(config.SETTINGS_GEOMETRY_KEY, current_geometry)
 
-        # Save other settings using keys from config.py
-        self.save_setting(config.SETTINGS_CREDENTIALS_PATH_KEY, settings_dict.get('credentials_path'))
+        # Save OCR Provider settings
+        self.save_setting(config.SETTINGS_OCR_PROVIDER_KEY, settings_dict.get('ocr_provider'))
+        self.save_setting(config.SETTINGS_GOOGLE_CREDENTIALS_PATH_KEY, settings_dict.get('google_credentials_path'))
+        self.save_setting(config.SETTINGS_OCRSPACE_API_KEY, settings_dict.get('ocrspace_api_key'))
+        self.save_setting(config.SETTINGS_OCR_LANGUAGE_KEY, settings_dict.get('ocr_language_code')) # <<< SAVE OCR LANG
+
+        # Save Translation settings
         self.save_setting(config.SETTINGS_DEEPL_API_KEY, settings_dict.get('deepl_api_key'))
         self.save_setting(config.SETTINGS_TARGET_LANG_KEY, settings_dict.get('target_language_code'))
         self.save_setting(config.SETTINGS_TRANSLATION_ENGINE_KEY, settings_dict.get('translation_engine_key'))
 
+        # Save UI / Behavior settings
         font = settings_dict.get('display_font')
         self.save_setting(config.SETTINGS_FONT_KEY, font.toString() if isinstance(font, QFont) else None)
 
