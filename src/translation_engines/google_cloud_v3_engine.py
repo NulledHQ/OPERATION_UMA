@@ -20,7 +20,7 @@ from src.translation_engines.base_engine import TranslationEngine, TranslationEr
 class GoogleCloudV3Engine(TranslationEngine):
     """
     Translation engine using the official Google Cloud Translation API v3.
-    Requires Google Cloud credentials.
+    Requires Google Cloud credentials. Includes explicit language detection.
     """
     REQUIRED_CONFIG_KEYS = ['credentials_path']
 
@@ -83,50 +83,90 @@ class GoogleCloudV3Engine(TranslationEngine):
                 self.parent_path is not None)
 
     def translate(self, text: str, target_language_code: str, source_language_code: str = None) -> str:
-        """Translates text using Google Translate API v3."""
+        """
+        Translates text using Google Translate API v3.
+        Detects source language automatically if not provided.
+        """
         if not self.is_available():
              reason = "required libraries missing" if translate is None else "client initialization failed (check credentials?)"
              raise TranslationError(f"Google Cloud V3 Engine not available ({reason}).")
         if not target_language_code: raise ValueError("Target language code cannot be empty.")
         if not text: return "" # Nothing to translate
 
+        detected_source_code = None # Variable to store detected language
+
         try:
-            request = {
+            # --- Step 1: Detect Source Language (if not provided) ---
+            if not source_language_code:
+                logging.debug(f"Requesting Google V3 language detection for text: '{text[:50]}...'")
+                detect_request = {
+                    "parent": self.parent_path,
+                    "content": text,
+                    "mime_type": "text/plain" # Or "text/html" if applicable
+                }
+                detect_response = self.client.detect_language(request=detect_request)
+
+                if detect_response.languages:
+                    # Sort by confidence or take the first one (usually most confident)
+                    detected_source_code = detect_response.languages[0].language_code
+                    confidence = detect_response.languages[0].confidence
+                    logging.debug(f"Google V3 detected source language: '{detected_source_code}' (Confidence: {confidence:.2f})")
+                else:
+                    logging.warning("Google V3 could not detect source language reliably.")
+                    # Optionally, fallback to a default source or raise an error
+                    # For now, we proceed and let translate_text try auto-detect
+                    # raise TranslationError("Could not detect source language.")
+            else:
+                logging.debug(f"Using provided source language code: '{source_language_code}'")
+                detected_source_code = source_language_code # Use the provided one
+
+            # --- Step 2: Translate Text ---
+            translate_request = {
                 "parent": self.parent_path,
                 "contents": [text],
                 "mime_type": "text/plain", # Or "text/html"
                 "target_language_code": target_language_code,
             }
-            if source_language_code:
-                 request["source_language_code"] = source_language_code
-                 log_src = source_language_code
-            else: log_src = 'auto' # For logging
+            # Use the detected (or provided) source language code
+            if detected_source_code:
+                 translate_request["source_language_code"] = detected_source_code
+                 log_src = detected_source_code
+            else:
+                 # Fallback to auto-detect if detection failed but we didn't raise error
+                 log_src = 'auto'
 
             logging.debug(f"Requesting Google V3 translation: target='{target_language_code}', source='{log_src}'")
-            response = self.client.translate_text(request=request)
+            translate_response = self.client.translate_text(request=translate_request)
 
-            if not response.translations:
+            if not translate_response.translations:
                 raise TranslationError("Translation failed: No result from Google V3 API.")
 
-            result = response.translations[0]
+            result = translate_response.translations[0]
             translated = html.unescape(result.translated_text) # API might return HTML entities
-            detected_src = result.detected_language_code or 'unknown'
-            logging.debug(f"Google V3 translated (Detected: {detected_src}): '{text[:50]}...' -> '{translated[:50]}...'")
+            # Log the source language actually used by the translation step
+            final_detected_src = result.detected_language_code or detected_source_code or 'unknown'
+            logging.debug(f"Google V3 translated (Detected/Used Src: {final_detected_src}): '{text[:50]}...' -> '{translated[:50]}...'")
             return translated
 
         except google_exceptions.InvalidArgument as e:
              logging.error(f"Google Cloud V3 Engine: Invalid argument - {e}")
              # Check if it's a language code error
              if "language code" in str(e).lower():
-                  raise TranslationError(f"Invalid language code ('{target_language_code}' or source '{source_language_code}').") from e
+                  invalid_code = target_language_code if target_language_code in str(e) else (detected_source_code or source_language_code or 'unknown')
+                  raise TranslationError(f"Invalid language code ('{invalid_code}').") from e
              else:
                   raise TranslationError(f"Invalid argument: {e.message}") from e
         except google_exceptions.PermissionDenied as e:
             logging.error(f"Google Cloud V3 Engine: Permission denied - {e}")
             raise TranslationError("Permission denied. Check API key/credentials and API enablement.") from e
+        except google_exceptions.NotFound as e:
+            logging.error(f"Google Cloud V3 Engine: Not Found - {e}")
+            raise TranslationError(f"API endpoint or resource not found: {e.message}") from e
         except google_exceptions.GoogleAPIError as e:
-             logging.exception(f"Google Cloud V3 Engine: API error during translation:")
+             # Catch-all for other Google API errors
+             logging.exception(f"Google Cloud V3 Engine: API error during operation:")
              raise TranslationError(f"Google API Error: {e.message}") from e
         except Exception as e:
-             logging.exception(f"Google Cloud V3 Engine: Unexpected error during translation:")
+             # Catch unexpected non-Google errors
+             logging.exception(f"Google Cloud V3 Engine: Unexpected error:")
              raise TranslationError(f"Unexpected Error: {type(e).__name__}") from e

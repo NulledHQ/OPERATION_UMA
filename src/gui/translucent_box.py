@@ -10,8 +10,9 @@ from PyQt5.QtWidgets import (QWidget, QApplication, QPushButton, QTextEdit,
                              QMenu, QAction, QColorDialog, QInputDialog, QStyle,
                              QFileDialog, QMessageBox, QFontDialog, QDialog)
 # Use QApplication for processEvents if needed
-from PyQt5.QtCore import Qt, QPoint, QRect, QTimer, QThread, QSettings, pyqtSignal, QByteArray, QStandardPaths, QObject, QSize, pyqtSlot
-from PyQt5.QtGui import QColor, QPainter, QBrush, QFont, QIcon, QCursor, QTextOption
+from PyQt5.QtCore import Qt, QPoint, QRect, QTimer, QThread, QSettings, pyqtSignal, QByteArray, QStandardPaths, QObject, QSize, pyqtSlot, QRectF
+from PyQt5.QtGui import QColor, QPainter, QBrush, QFont, QIcon, QCursor, QTextOption, QPainterPath
+
 
 # --- Import application modules using absolute paths from src ---
 from src import config
@@ -27,7 +28,7 @@ class TranslucentBox(QWidget):
     Main application window. Orchestrates UI, settings, history, and OCR.
     Delegates settings/history persistence to manager classes.
     """
-    # ...(Initialization __init__, _apply_loaded_settings, etc. remain the same)...
+    # ...(Initialization __init__, etc. need adjustments)...
     def __init__(self):
         super().__init__()
 
@@ -38,6 +39,14 @@ class TranslucentBox(QWidget):
              except: print("CRITICAL: SettingsManager failed. App cannot continue.") # Fallback print
              sys.exit(1)
 
+        # --- Initialize State Variables ---
+        # Initialize defaults before loading to prevent attribute errors
+        self.bg_color = QColor(config.DEFAULT_BG_COLOR) # Will be updated by load
+        self.textarea_alpha = config.DEFAULT_BG_COLOR.alpha() # Default alpha for text area
+        self.display_font = QFont() # Default font
+        self.ocr_interval = config.DEFAULT_OCR_INTERVAL_SECONDS
+        self.is_locked = False
+        # --- Load settings ---
         initial_settings = self.settings_manager.load_all_settings()
         self._apply_loaded_settings(initial_settings) # Load settings into attributes
 
@@ -45,7 +54,7 @@ class TranslucentBox(QWidget):
         if not self.history_manager:
              QMessageBox.warning(None, "Init Warning", "HistoryManager failed. History unavailable.")
 
-        # --- Initialize State Variables ---
+        # --- Initialize MORE State Variables ---
         self._update_prerequisite_state_flags() # Update flags based on loaded settings
         self.is_live_mode = False
         self.drag_pos = None
@@ -60,7 +69,7 @@ class TranslucentBox(QWidget):
 
         # --- UI Initialization ---
         self._setup_window_properties()
-        self.initUI()
+        self.initUI() # This now calls _update_text_display_style internally
         self._update_ocr_button_states() # Update button state based on loaded settings
         self.restore_geometry(initial_settings.get('saved_geometry'))
         self.apply_initial_lock_state()
@@ -89,14 +98,26 @@ class TranslucentBox(QWidget):
         # UI / Behavior Settings
         self.display_font = settings_dict.get('display_font', QFont())
         self.ocr_interval = settings_dict.get('ocr_interval', config.DEFAULT_OCR_INTERVAL_SECONDS)
-        self.bg_color = settings_dict.get('bg_color', QColor(config.DEFAULT_BG_COLOR))
         self.is_locked = settings_dict.get('is_locked', False)
+
+        # --- Handle Colors ---
+        loaded_bg_color = settings_dict.get('bg_color', QColor(config.DEFAULT_BG_COLOR))
+        if not isinstance(loaded_bg_color, QColor) or not loaded_bg_color.isValid():
+            logging.warning(f"Invalid bg_color loaded ('{loaded_bg_color}'). Using default.")
+            loaded_bg_color = QColor(config.DEFAULT_BG_COLOR)
+
+        # Set window background color with fixed alpha from config default
+        default_win_alpha = config.DEFAULT_BG_COLOR.alpha()
+        self.bg_color = QColor(0, 0, 0, 255)
+        # Store the alpha from the loaded setting specifically for the text area
+        self.textarea_alpha = loaded_bg_color.alpha()
+
 
         # Validation / Type Checking
         if self.ocr_provider not in config.AVAILABLE_OCR_PROVIDERS: self.ocr_provider = config.DEFAULT_OCR_PROVIDER
         if self.translation_engine_key not in config.AVAILABLE_ENGINES: self.translation_engine_key = config.DEFAULT_TRANSLATION_ENGINE
         if not isinstance(self.display_font, QFont): self.display_font = QFont()
-        if not isinstance(self.bg_color, QColor): self.bg_color = QColor(config.DEFAULT_BG_COLOR)
+        # bg_color and textarea_alpha already handled/validated above
         if not isinstance(self.ocr_interval, int) or self.ocr_interval <= 0: self.ocr_interval = config.DEFAULT_OCR_INTERVAL_SECONDS
         # Validate OCR language code only if OCR.space is selected
         if self.ocr_provider == 'ocr_space' and self.ocr_language_code not in config.OCR_SPACE_LANGUAGES:
@@ -119,14 +140,18 @@ class TranslucentBox(QWidget):
             settings_dict = self.settings_manager.load_all_settings()
             self._apply_loaded_settings(settings_dict) # Apply loaded settings
             self._update_prerequisite_state_flags() # Update flags based on new settings
-            self._update_text_display_style()
+            self._update_text_display_style() # Apply style changes (font, text alpha)
             self._update_ocr_button_states() # Update button state/tooltip
             self.apply_initial_lock_state()
-            self.update() # Redraw window
+            self.update() # Redraw window (uses self.bg_color with fixed alpha)
         else: logging.error("SettingsManager not available.")
 
     def save_settings(self):
         if self.settings_manager:
+            # Combine the base RGB from window color with the current text area alpha for saving
+            base_rgb = self.bg_color.getRgb() # Get RGB from the (fixed alpha) window color
+            saved_bg_color_for_settings = QColor(base_rgb[0], base_rgb[1], base_rgb[2], self.textarea_alpha)
+
             current_settings_data = {
                 'ocr_provider': self.ocr_provider,
                 'google_credentials_path': self.google_credentials_path,
@@ -137,7 +162,7 @@ class TranslucentBox(QWidget):
                 'translation_engine_key': self.translation_engine_key,
                 'display_font': self.display_font,
                 'ocr_interval': self.ocr_interval,
-                'bg_color': self.bg_color,
+                'bg_color': saved_bg_color_for_settings, # Save color combining base RGB and textarea alpha
                 'is_locked': self.is_locked,
             }
             current_geometry = self.saveGeometry()
@@ -195,13 +220,41 @@ class TranslucentBox(QWidget):
         self.grab_button.clicked.connect(self.grab_text); self.grab_button.setStyleSheet(grab_style)
         self.text_display = QTextEdit(self); self.text_display.setReadOnly(True); self.text_display.setWordWrapMode(QTextOption.WrapAnywhere)
         self.text_display.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded); self.text_display.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        # Apply initial style (font and background alpha)
         self._update_text_display_style()
 
     def _update_text_display_style(self):
+        """Updates the QTextEdit style including font and background alpha."""
+        if not hasattr(self, 'text_display'): return # Avoid error during early init
+
         if not isinstance(self.display_font, QFont): self.display_font = QFont()
         self.text_display.setFont(self.display_font)
-        style = f"background-color: rgba(255, 255, 255, 220); color: #000; border-radius: 5px; padding: 5px;"
+
+        # Ensure textarea_alpha is initialized if called early
+        if not hasattr(self, 'textarea_alpha'):
+             self.textarea_alpha = config.DEFAULT_BG_COLOR.alpha()
+
+        # Use a white base for the text area background for readability
+        bg_r, bg_g, bg_b = 255, 255, 255 # White
+        # Apply the stored textarea_alpha (convert 0-255 to 0.0-1.0 for CSS)
+        alpha_float = max(0.0, min(1.0, self.textarea_alpha / 255.0))
+        text_bg_color_str = f"rgba({bg_r}, {bg_g}, {bg_b}, {alpha_float:.3f})"
+
+        # Use black text color for contrast
+        text_color_str = "#000000"
+
+        # Set the stylesheet
+        style = (
+            f"QTextEdit {{ "
+            f"background-color: {text_bg_color_str}; "
+            f"color: {text_color_str}; "
+            f"border-radius: 5px; "
+            f"padding: 5px; "
+            f"}}"
+        )
         self.text_display.setStyleSheet(style)
+        logging.debug(f"Updated text_display style with alpha {self.textarea_alpha} -> {alpha_float:.3f}")
+
 
     # --------------------------------------------------------------------------
     # OCR / Worker Interaction (Methods starting with _)
@@ -411,13 +464,14 @@ class TranslucentBox(QWidget):
         if self.history_manager: self.history_manager.add_item(ocr_text, translated_text)
         safe_ocr=html.escape(ocr_text or ""); safe_trans=html.escape(translated_text or "")
         lang=html.escape(self.target_language_code.upper()); ocr_fmt=safe_ocr.replace('\n','<br>'); trans_fmt=safe_trans.replace('\n','<br>')
-        font=f"font-family:'{self.display_font.family()}'; font-size:{self.display_font.pointSize()}pt;"
-        err="color:#A00;"; ok="color:#005;"; is_err=translated_text and translated_text.startswith("[") and "Error:" in translated_text
+        font_style=f"font-family:'{self.display_font.family()}'; font-size:{self.display_font.pointSize()}pt;" # Use font style consistently
+        err_style="color:#A00;"; ok_style="color:#005;"; is_err=translated_text and translated_text.startswith("[") and "Error:" in translated_text
         ocr_provider_name = config.AVAILABLE_OCR_PROVIDERS.get(self.ocr_provider, self.ocr_provider)
         trans_engine_name = config.AVAILABLE_ENGINES.get(self.translation_engine_key, self.translation_engine_key)
 
-        html_out=f"""<div style="margin-bottom:10px;"><b style="color:#333;">--- OCR ({ocr_provider_name}) ---</b><br/><div style="color:#000; margin-left:5px; {font}">{ocr_fmt if ocr_fmt else '<i style="color:#777;">No text detected.</i>'}</div></div>""" \
-                   f"""<div><b style="color:#333;">--- Translation ({trans_engine_name} / {lang}) ---</b><br/><div style="margin-left:5px; {font} {err if is_err else ok}">{trans_fmt if trans_fmt else ('<i style="color:#777;">N/A (No OCR text)</i>' if not ocr_fmt else '<i style="color:#777;">No translation.</i>')}</div></div>"""
+        # Apply font style to both OCR and Translation sections
+        html_out=f"""<div style="margin-bottom:10px;"><b style="color:#333;">--- OCR ({ocr_provider_name}) ---</b><br/><div style="color:#000; margin-left:5px; {font_style}">{ocr_fmt if ocr_fmt else '<i style="color:#777;">No text detected.</i>'}</div></div>""" \
+                   f"""<div><b style="color:#333;">--- Translation ({trans_engine_name} / {lang}) ---</b><br/><div style="margin-left:5px; {font_style} {err_style if is_err else ok_style}">{trans_fmt if trans_fmt else ('<i style="color:#777;">N/A (No OCR text)</i>' if not ocr_fmt else '<i style="color:#777;">No translation.</i>')}</div></div>"""
         self.text_display.setAlignment(Qt.AlignLeft); self.text_display.setHtml(html_out)
 
     def on_ocr_error(self, error_msg):
@@ -425,8 +479,8 @@ class TranslucentBox(QWidget):
         self.text_display.show()
 
         logging.error(f"Worker error signal received: {error_msg}")
-        font=f"font-family:'{self.display_font.family()}'; font-size:{self.display_font.pointSize()}pt;"
-        err_html=f"""<p style="color:#A00;font-weight:bold;">--- Error ---</p><p style="color:#A00; {font}">{html.escape(error_msg)}</p>"""
+        font_style=f"font-family:'{self.display_font.family()}'; font-size:{self.display_font.pointSize()}pt;"
+        err_html=f"""<p style="color:#A00;font-weight:bold;">--- Error ---</p><p style="color:#A00; {font_style}">{html.escape(error_msg)}</p>"""
         self.text_display.setAlignment(Qt.AlignLeft); self.text_display.setHtml(err_html)
         # Note: on_thread_finished is connected to thread.finished signal,
         # so UI state reset will happen there automatically after error signal.
@@ -455,14 +509,19 @@ class TranslucentBox(QWidget):
         self.worker = None
 
 
-    # (open_settings_dialog, window interaction, lifecycle, live mode methods remain the same)
+    # (open_settings_dialog, window interaction, lifecycle, live mode methods need update or are same)
     # --------------------------------------------------------------------------
     # Settings Dialog Interaction
     # --------------------------------------------------------------------------
     def open_settings_dialog(self):
         if 'SettingsDialog' not in globals() or not SettingsDialog: QMessageBox.critical(self, "Error", "SettingsDialog not loaded."); return
         logging.debug("Opening settings dialog...")
-        # Pass current state to dialog
+
+        # --- Prepare current data for dialog ---
+        # Use the RGB from self.bg_color (which has fixed alpha) and combine with self.textarea_alpha
+        current_base_rgb = self.bg_color.getRgb()
+        current_color_for_dialog = QColor(current_base_rgb[0], current_base_rgb[1], current_base_rgb[2], self.textarea_alpha)
+
         current_data = {
             'ocr_provider': self.ocr_provider,
             'google_credentials_path': self.google_credentials_path,
@@ -472,7 +531,7 @@ class TranslucentBox(QWidget):
             'target_language_code': self.target_language_code, # Target for translation
             'translation_engine': self.translation_engine_key,
             'display_font': self.display_font,
-            'bg_color': self.bg_color, # Pass QColor object
+            'bg_color': current_color_for_dialog, # Pass color with text area alpha
             'ocr_interval': self.ocr_interval,
             'is_locked': self.is_locked,
         }
@@ -494,22 +553,24 @@ class TranslucentBox(QWidget):
             self.ocr_interval=updated.get('ocr_interval', self.ocr_interval)
             self.is_locked=updated.get('is_locked', self.is_locked)
 
-            # Handle background color alpha update separately
-            new_alpha = updated.get('bg_alpha') # Get alpha value from dialog settings
+            # --- Handle background color alpha update ---
+            # The dialog returns 'bg_alpha' which is the desired alpha for the text area
+            new_alpha = updated.get('bg_alpha') # Get alpha value (0-255) from dialog settings
             if isinstance(new_alpha, int):
-                # Create a new QColor with the original RGB and the new Alpha
-                current_rgb = self.bg_color.getRgb() # Get current RGB
-                self.bg_color = QColor(current_rgb[0], current_rgb[1], current_rgb[2], new_alpha)
+                self.textarea_alpha = new_alpha # Update the textarea alpha attribute
             else:
                  logging.warning("Invalid alpha value received from settings dialog.")
+                 # Keep existing self.textarea_alpha
 
+            # The main window background color (self.bg_color) keeps its fixed alpha
+            # No need to update self.bg_color's alpha here
 
             self._update_prerequisite_state_flags() # Update flags based on new settings
-            self._update_text_display_style()
-            self.apply_initial_lock_state() # Apply lock state / opacity
-            self.update() # Trigger repaint for background color change
-            self._update_ocr_button_states() # Update button state/tooltip
-            self.save_settings() # Save the applied settings
+            self._update_text_display_style()   # Re-apply style with potentially new alpha/font for text area
+            self.apply_initial_lock_state()      # Apply lock state / window opacity
+            self.update()                        # Trigger repaint for main window (uses self.bg_color with fixed alpha)
+            self._update_ocr_button_states()      # Update button state/tooltip
+            self.save_settings()                 # Save the applied settings (save_settings handles combining color correctly)
             logging.debug("Settings applied and saved.")
         else:
             logging.debug("Settings dialog cancelled.")
@@ -519,26 +580,69 @@ class TranslucentBox(QWidget):
     # Window Interaction (Mouse, Paint) - Kept in main class
     # --------------------------------------------------------------------------
     def resizeEvent(self, event):
-        btn_sz, btn_m, txt_m = 28, 5, 8; top_h = btn_sz+(btn_m*2); grab_w=70
-        self.close_button.setGeometry(self.width()-btn_sz-btn_m, btn_m, btn_sz, btn_sz)
-        self.options_button.setGeometry(self.close_button.x()-btn_sz-btn_m, btn_m, btn_sz, btn_sz)
+        # --- Layout Adjustments ---
+        btn_sz, btn_m, txt_m = 28, 5, 8 # Button size, button margin, text margin
+        top_h = btn_sz + (btn_m * 2) # Height of the top control area
+        grab_w = 70 # Width of the grab button
+
+        # Position buttons (right to left)
+        self.close_button.setGeometry(self.width() - btn_sz - btn_m, btn_m, btn_sz, btn_sz)
+        self.options_button.setGeometry(self.close_button.x() - btn_sz - btn_m, btn_m, btn_sz, btn_sz)
+        # Position grab button (left)
         self.grab_button.setGeometry(btn_m, btn_m, grab_w, btn_sz)
-        txt_w = max(0, self.width()-(txt_m*2)); txt_h = max(0, self.height()-top_h-txt_m)
+
+        # Position text display area below buttons
+        txt_w = max(0, self.width() - (txt_m * 2))
+        txt_h = max(0, self.height() - top_h - txt_m)
         self.text_display.setGeometry(txt_m, top_h, txt_w, txt_h)
-        if event: super().resizeEvent(event)
+
+        # --- Call Superclass ---
+        if event:
+            super().resizeEvent(event) # Important for proper widget resizing
+
 
     def paintEvent(self, event):
-        painter = QPainter(self); painter.setRenderHint(QPainter.Antialiasing)
-        # Ensure bg_color is a valid QColor before using it
-        if isinstance(self.bg_color, QColor) and self.bg_color.isValid():
-            painter.setBrush(QBrush(self.bg_color))
-        else:
-            # Fallback if color is invalid for some reason
-            painter.setBrush(QBrush(QColor(config.DEFAULT_BG_COLOR)))
-            logging.warning(f"Invalid bg_color detected during paintEvent: {self.bg_color}. Using default.")
+        """Paints the main window's background, excluding the text area."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
 
-        painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(self.rect(), 7, 7)
+        # --- Define Colors ---
+        # Use the configured background color for the frame/title bar
+        frame_color = self.bg_color
+        if not isinstance(frame_color, QColor) or not frame_color.isValid():
+            logging.warning(f"Invalid self.bg_color detected during paintEvent: {self.bg_color}. Using default.")
+            frame_color = QColor(config.DEFAULT_BG_COLOR) # Use default config color
+
+        # --- Define Geometry ---
+        window_rect = self.rect()
+        text_area_rect = self.text_display.geometry() # Get the text area's geometry relative to the window
+        border_radius = 7 # Keep the rounded corners consistent
+
+        # --- Create Drawing Paths ---
+        full_window_path = QPainterPath()
+        # Convert QRect to QRectF and ensure radii are floats
+        full_window_path.addRoundedRect(QRectF(window_rect), border_radius, border_radius) # <<< CORRECTED LINE
+        
+        # Path for the text area rectangle - QRectF might be safer here too
+        text_area_path = QPainterPath()
+        text_area_path.addRect(QRectF(text_area_rect)) # Convert this too for consistency
+
+        # --- Calculate Background Path (Window MINUS Text Area) ---
+        # Subtract the text area path from the full window path
+        background_path = full_window_path.subtracted(text_area_path)
+
+        # --- Draw the Background ---
+        painter.setPen(Qt.NoPen) # No border for the background fill
+        painter.setBrush(QBrush(frame_color))
+        # Draw only the calculated background path (excluding the text area)
+        painter.drawPath(background_path)
+
+        # Optional: Draw a border around the whole window if desired
+        # border_pen = QPen(QColor(255, 255, 255, 50)) # Example: faint white border
+        # border_pen.setWidth(1)
+        # painter.setPen(border_pen)
+        # painter.setBrush(Qt.NoBrush)
+        # painter.drawPath(full_window_path) # Draw the outline
 
 
     def mousePressEvent(self, event):
