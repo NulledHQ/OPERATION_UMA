@@ -1,4 +1,4 @@
-# Operation_UMA Translator
+# Screen OCR Translator
 
 A desktop application for Windows (and potentially other platforms with adjustments) that captures a selected screen region, performs Optical Character Recognition (OCR), and translates the recognized text using various translation engines.
 
@@ -32,18 +32,18 @@ A desktop application for Windows (and potentially other platforms with adjustme
 ## Requirements
 
 * Python 3.8+
-* PyQt5
-* mss (for screen capture)
-* Pillow (PIL fork) (for image processing)
-* google-cloud-vision (for Google OCR)
-* google-cloud-translate (for Google Translation)
-* google-auth
-* google-api-core
-* deepl (for DeepL Translation)
-* googletrans==4.0.0rc1 (for unofficial Google Translation)
-* keyboard (for global hotkey)
-* requests (for OCR.space)
-* *(Consider creating a `requirements.txt` file)*
+* The following libraries (see `requirements.txt` [cite: 1]):
+    ```
+    PyQt5==5.15.10
+    mss==9.0.1
+    Pillow==10.3.0
+    keyboard==0.13.5
+    google-cloud-vision==3.7.2
+    google-cloud-translate==3.15.1
+    google-auth==2.29.0
+    googletrans==4.0.0rc1
+    deepl==1.18.1
+    ```
 
 ## Setup & Installation
 
@@ -56,10 +56,8 @@ A desktop application for Windows (and potentially other platforms with adjustme
     # macOS/Linux: source venv/bin/activate
     ```
 4.  **Install Dependencies:**
-    *(Ideally, create a `requirements.txt` and run `pip install -r requirements.txt`)*
-    Alternatively, install manually:
     ```bash
-    pip install PyQt5 mss Pillow google-cloud-vision google-cloud-translate google-auth google-api-core deepl googletrans==4.0.0rc1 keyboard requests
+    pip install -r requirements.txt [cite: 1]
     ```
 5.  **API Keys / Credentials:**
     * **Google Cloud (Conditional):**
@@ -112,8 +110,8 @@ A desktop application for Windows (and potentially other platforms with adjustme
 
 ## Troubleshooting
 
-* **`googletrans` Errors:** If the unofficial engine fails (e.g., `JSONDecodeError`, network errors), it might be temporarily blocked or broken. Try again later or switch engines. Ensure you installed `googletrans==4.0.0rc1` [cite: src/translation_engines/googletrans_engine.py].
+* **`googletrans` Errors:** If the unofficial engine fails (e.g., `JSONDecodeError`, network errors), it might be temporarily blocked or broken. Try again later or switch engines. Ensure you installed `googletrans==4.0.0rc1` [cite: 1, src/translation_engines/googletrans_engine.py].
 * **API Key/Credential Errors (Google Cloud/DeepL/OCR.space):** Double-check that the correct API key/credentials file is selected in settings and that the corresponding APIs (Vision, Translate) are enabled in your cloud project. Verify the service account has appropriate roles (e.g., Cloud Vision AI User, Cloud Translation API User). Check for quota limits [cite: src/gui/settings_dialog.py].
 * **OCR Fails (Google Vision):** Ensure the Cloud Vision API is enabled and the credentials file is valid and selected correctly. Check network connection [cite: src/core/ocr_worker.py].
 * **OCR Fails (OCR.space):** Ensure the API key is correct and you have selected an appropriate OCR language in settings. Check network connection and OCR.space service status [cite: src/core/ocr_worker.py].
-* **Hotkey Not Working:** Ensure the `keyboard` library installed correctly. May require elevated permissions on some systems (run as administrator - use with caution). Check for conflicts with other global hotkeys [cite: src/core/hotkey_manager.py].
+* **Hotkey Not Working:** Ensure the `keyboard` library installed correctly. May require elevated permissions on some systems (run as administrator - use with caution). Check for conflicts with other global hotkeys [cite: src/core/hotkey_manager.py, 1].
