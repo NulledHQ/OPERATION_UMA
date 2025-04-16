@@ -99,7 +99,3 @@ A desktop application for Windows (and potentially other platforms with adjustme
 * **API Key Errors (DeepL/Google Cloud):** Double-check that the correct API key/credentials file is selected in settings and that the corresponding APIs (Vision, Translate) are enabled in your cloud project. Check for quota limits.
 * **Hotkey Not Working:** Ensure the `keyboard` library installed correctly and that the application has necessary permissions (sometimes requires running as administrator, though use with caution). Conflicts with other global hotkeys are possible.
 * **OCR Fails:** Ensure the Google Cloud Vision API is enabled and the credentials file is valid and selected correctly. Check network connection.
-
-## License
-
-(Specify your license here, e.g., MIT License, Apache 2.0, or leave blank if undecided)
