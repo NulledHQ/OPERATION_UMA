@@ -73,7 +73,7 @@ LOG_FORMAT = '[%(asctime)s] %(levelname)s [%(threadName)s] in %(module)s.%(funcN
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 # --- QSettings Keys ---
-SETTINGS_ORG = "MyCompanyOrName" # Change as needed
+SETTINGS_ORG = "NulledHQ" # Change as needed
 SETTINGS_APP = "ScreenOCRTranslator"
 SETTINGS_GEOMETRY_KEY = "windowGeometry"
 SETTINGS_FONT_KEY = "displayFont"
