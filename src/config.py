@@ -68,12 +68,12 @@ OCR_SPACE_LANGUAGES = {
 
 
 # --- Logging ---
-LOG_LEVEL = "DEBUG" # Or "INFO", "WARNING", "ERROR"
+LOG_LEVEL = "INFO" # Or "INFO", "WARNING", "ERROR"
 LOG_FORMAT = '[%(asctime)s] %(levelname)s [%(threadName)s] in %(module)s.%(funcName)s: %(message)s'
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 # --- QSettings Keys ---
-SETTINGS_ORG = "NulledHQ" # Change as needed
+SETTINGS_ORG = "NulledHQ"
 SETTINGS_APP = "ScreenOCRTranslator"
 SETTINGS_GEOMETRY_KEY = "windowGeometry"
 SETTINGS_FONT_KEY = "displayFont"
