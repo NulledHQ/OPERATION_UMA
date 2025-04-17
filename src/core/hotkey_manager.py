@@ -1,163 +1,179 @@
 # src/core/hotkey_manager.py
 import threading
 import logging
+import time # Keep time for potential debouncing if needed
+from collections import defaultdict
+
 try:
     import keyboard
+    # Define constants based on the keyboard library's event types
+    KEY_DOWN = keyboard.KEY_DOWN
+    KEY_UP = keyboard.KEY_UP
 except ImportError:
     logging.critical("Failed to import 'keyboard' library. Hotkeys will not work. Run 'pip install keyboard'")
-    keyboard = None # Define dummy to prevent NameErrors
+    keyboard = None
+    KEY_DOWN = 'down' # Dummy values if import fails
+    KEY_UP = 'up'
 
 from PyQt5.QtCore import QTimer
 
-# Use absolute import from src package root
-# from src import config # No longer need config here for default
-
-# Flag and state variables
-_hotkey_listener_started = False
+# --- Module State ---
 _listener_thread = None
-_registered_hotkey_func = None # Store the actual hotkey function object returned by keyboard lib
-_current_hotkey_str = "" # Store the string used for registration
+_stop_event = threading.Event() # Used to signal the listener thread to stop
+_hook_active = False
+_current_hotkey_str = ""
+_main_callback = None # Store the main callback function (e.g., grab_text)
+_pressed_keys = set() # Track currently pressed keys
+_hotkey_keys = set() # Parsed keys from the _current_hotkey_str
+_hotkey_lock = threading.Lock() # Lock for accessing shared state (_current_hotkey_str, _hotkey_keys)
 
-def _listen_for_hotkey(key_combination, callback_func):
-    """Target function for the listener thread."""
-    global _registered_hotkey_func, _hotkey_listener_started, _current_hotkey_str
+def _parse_hotkey_string(hotkey_str):
+    """Parses the hotkey string into a set of lower-case key names."""
+    if not hotkey_str:
+        return set()
+    # Normalize and split, converting to lowercase
+    return set(key.strip().lower() for key in hotkey_str.split('+'))
+
+def _on_key_event(event):
+    """Callback function for keyboard.hook(). Processes key events."""
+    global _pressed_keys, _hotkey_keys, _current_hotkey_str, _main_callback
+    if keyboard is None or not _main_callback:
+        return
+
+    try:
+        # Get the canonical name, lowercased
+        # Use event.name which is generally preferred
+        key_name = event.name.lower() if event.name else None
+        if not key_name: return # Ignore events without a name
+
+        # Update the set of currently pressed keys
+        if event.event_type == KEY_DOWN:
+            _pressed_keys.add(key_name)
+        elif event.event_type == KEY_UP:
+            _pressed_keys.discard(key_name) # Use discard to avoid errors if key wasn't tracked
+
+        # Check for hotkey match ONLY on key down events
+        if event.event_type == KEY_DOWN:
+            with _hotkey_lock:
+                target_keys = _hotkey_keys
+
+            # Check if the currently pressed keys EXACTLY match the target hotkey keys
+            # Use issubset and check lengths for an exact match
+            if target_keys and target_keys.issubset(_pressed_keys) and len(_pressed_keys) == len(target_keys):
+                logging.debug(f"Hotkey '{_current_hotkey_str}' detected!")
+                # Trigger the main callback in the Qt main thread
+                QTimer.singleShot(0, _main_callback)
+                # Optional: Consume the event to prevent it going further?
+                # Be careful with consuming, might interfere elsewhere.
+                # return False # If keyboard hook callback allows consumption
+
+    except Exception as e:
+        logging.exception(f"Error processing key event in hotkey manager: {e}")
+
+def _run_hook_listener():
+    """Target function for the listener thread that runs the hook."""
+    global _hook_active
     if keyboard is None: return
 
-    logging.debug(f"Hotkey listener thread attempting to register '{key_combination}'...")
+    logging.debug("Hotkey listener thread starting keyboard.hook()...")
+    hook_ref = None
     try:
-        # Ensure previous hotkeys are cleared before adding a new one in the thread
-        # This might be necessary if the thread restarts or logic changes
-        # Use unhook_all() cautiously if other apps might use keyboard lib hooks.
-        # Using remove_hotkey(_registered_hotkey_func) before adding might be slightly safer
-        # if _registered_hotkey_func:
-        #     keyboard.remove_hotkey(_registered_hotkey_func)
-        # But unhook_all is simpler if we assume this app controls all its hooks.
-        keyboard.unhook_all()
+        # Register the hook
+        hook_ref = keyboard.hook(_on_key_event, suppress=False) # suppress=False lets events pass through
+        _hook_active = True
+        logging.info(f"Keyboard hook registered. Listening for hotkey '{_current_hotkey_str}'.")
 
-        # Use a lambda with QTimer.singleShot to run callback in the main Qt thread
-        # Store the actual function object returned by add_hotkey for later removal attempt
-        _registered_hotkey_func = keyboard.add_hotkey(
-            key_combination,
-            lambda: QTimer.singleShot(0, callback_func),
-            trigger_on_release=False # Trigger on press
-        )
-        _current_hotkey_str = key_combination # Store the string we registered
-        logging.info(f"Global hotkey '{key_combination}' registered.")
-        _hotkey_listener_started = True
+        # Keep the thread alive while the stop event is not set
+        _stop_event.wait() # Block until stop_event is set
 
-        # keyboard.wait() blocks. This makes dynamic changes hard without restarting thread.
-        keyboard.wait()
-
-    except ValueError as ve: # keyboard lib raises ValueError for invalid hotkey strings
-        logging.error(f"Hotkey listener: Invalid hotkey format '{key_combination}'. Error: {ve}")
-        _hotkey_listener_started = False # Ensure flag is reset if registration fails
     except Exception as e:
-        logging.exception("Error in hotkey listener thread:")
-        _hotkey_listener_started = False # Ensure flag is reset on other errors
+        logging.exception("Error setting up or running keyboard hook:")
     finally:
+        _hook_active = False
+        if keyboard and hook_ref:
+            try:
+                keyboard.unhook(hook_ref)
+                logging.debug("Keyboard hook removed.")
+            except Exception as e:
+                logging.exception("Error removing keyboard hook:")
+        # keyboard.unhook_all() # Alternative, potentially broader cleanup
         logging.debug("Hotkey listener thread finished.")
-        _registered_hotkey_func = None
-        _current_hotkey_str = ""
-        # Set started flag to False ONLY if the thread is actually stopping.
-        # If wait() returns due to unhook_all() called from outside,
-        # the flag might be reset prematurely if a new thread is starting.
-        # This logic might need refinement for robust dynamic changes.
-        _hotkey_listener_started = False # Reset flag when thread stops
 
-
-def setup_hotkey(hotkey_str, callback_func): # <<< ACCEPT HOTKEY STRING
-    """Sets up the global hotkey listener in a separate thread."""
-    global _hotkey_listener_started, _listener_thread, _current_hotkey_str
+def start_hotkey_listener(hotkey_str, callback_func):
+    """Starts the global hotkey listener using keyboard.hook in a thread."""
+    global _listener_thread, _stop_event, _current_hotkey_str, _main_callback, _hotkey_keys
     if keyboard is None:
-        logging.error("Cannot setup hotkey: 'keyboard' library not imported.")
-        return
+        logging.error("Cannot start hotkey listener: 'keyboard' library not imported.")
+        return False
     if not hotkey_str:
-        logging.error("Cannot setup hotkey: No hotkey string provided.")
-        return
+        logging.error("Cannot start hotkey listener: No hotkey string provided.")
+        return False
+    if _hook_active or (_listener_thread and _listener_thread.is_alive()):
+        logging.warning("Hotkey listener setup called while already running. Call stop first if needed.")
+        # If the request is for the same hotkey and callback, consider it a no-op success
+        if hotkey_str == _current_hotkey_str and callback_func == _main_callback:
+            return True
+        # Otherwise, changing requires stopping first (handled by update_active_hotkey or stop)
+        logging.error("Cannot start a new listener while one is active. Use update_active_hotkey or stop first.")
+        return False
 
-    # If listener already running, log warning (dynamic change not yet implemented)
-    if _hotkey_listener_started:
-        logging.warning(f"Hotkey listener setup called while already potentially running for '{_current_hotkey_str}'.")
-        # If the requested hotkey is the same as current, do nothing
-        if hotkey_str == _current_hotkey_str:
-             logging.debug("Requested hotkey is the same as the currently registered one.")
-             return
-        else:
-             # *** Dynamic change requires stopping the old thread cleanly ***
-             # *** Deferring this complex implementation ***
-             logging.error(f"Cannot change hotkey from '{_current_hotkey_str}' to '{hotkey_str}' while listener is running. Restart application to apply changes.")
-             return # Exit without starting a new thread
+    # Store callback and initial hotkey
+    _main_callback = callback_func
+    with _hotkey_lock:
+        _current_hotkey_str = hotkey_str
+        _hotkey_keys = _parse_hotkey_string(hotkey_str)
 
-    # Stop condition for the old thread if it exists and isn't alive (e.g., from previous error)
-    if _listener_thread and not _listener_thread.is_alive():
-         logging.debug("Cleaning up stale listener thread object.")
-         _listener_thread = None # Clear stale thread object
-
-
-    # Start a new listener thread
+    # Reset stop event and start the listener thread
+    _stop_event.clear()
+    _pressed_keys.clear() # Clear pressed keys state
     logging.info(f"Starting hotkey listener thread for '{hotkey_str}'...")
     _listener_thread = threading.Thread(
-        target=_listen_for_hotkey,
-        args=(hotkey_str, callback_func), # Pass the hotkey string
+        target=_run_hook_listener,
         name="HotkeyListenerThread",
         daemon=True
     )
     _listener_thread.start()
-    # Note: _hotkey_listener_started flag is set inside the thread upon successful registration
+    # Give the thread a moment to potentially start the hook
+    time.sleep(0.1)
+    return _hook_active # Return status based on whether hook started
 
-
-def unregister_hotkeys():
-    """Unregisters all hotkeys managed by the keyboard library."""
-    global _hotkey_listener_started, _registered_hotkey_func, _current_hotkey_str
-    if keyboard is None:
-        # Don't log error here, might be called during shutdown when lib is gone
-        # logging.warning("Cannot unregister hotkeys: 'keyboard' library not imported.")
+def stop_hotkey_listener():
+    """Stops the hotkey listener thread."""
+    global _listener_thread, _hook_active, _main_callback
+    if not _listener_thread or not _listener_thread.is_alive():
+        logging.debug("Hotkey listener thread already stopped or not started.")
+        _hook_active = False # Ensure flag is correct
         return
 
-    # Check if the listener was ever started or needs stopping
-    # Avoid calling unhook_all if not necessary or if thread never started.
-    # if not _hotkey_listener_started and not _registered_hotkey_func:
-    #      logging.debug("No active hotkeys known to unregister.")
-    #      return
+    logging.debug("Attempting to stop hotkey listener thread...")
+    _stop_event.set() # Signal the thread to exit its wait loop
+    _listener_thread.join(timeout=1.0) # Wait for the thread to terminate
 
-    logging.debug("Attempting to unregister hotkeys via unhook_all()...")
-    try:
-        # This should cause keyboard.wait() in the listener thread to return.
-        keyboard.unhook_all()
-        _registered_hotkey_func = None # Clear the stored function object
-        # Keep _current_hotkey_str until thread confirms exit? Or clear here? Clear here for now.
-        # _current_hotkey_str = ""
-        # The thread itself should reset _hotkey_listener_started in its finally block
-        logging.info("Keyboard unhook_all() called.")
+    if _listener_thread.is_alive():
+        logging.error("Hotkey listener thread did not stop gracefully.")
+        # Further action might be needed (though unhook should have happened in thread)
+    else:
+        logging.info("Hotkey listener thread stopped.")
 
-    except Exception as e:
-         # Use broad exception during shutdown/cleanup
-         logging.exception("Error occurred while calling keyboard.unhook_all():")
+    _listener_thread = None
+    _hook_active = False
+    _main_callback = None
+    _pressed_keys.clear()
 
-# --- Function for dynamic change (Deferred Implementation) ---
-# def change_hotkey(new_hotkey_str, callback_func):
-#     """ Safely stops the current listener, unregisters, and starts a new one. """
-#     logging.info(f"Attempting to change hotkey to: {new_hotkey_str}")
-#     unregister_hotkeys() # Unhook everything
-#
-#     # Need a reliable way to stop the listener thread here.
-#     # keyboard.wait() makes this tricky. Might need signals or different thread structure.
-#     # For now, this function is a placeholder.
-#     if _listener_thread and _listener_thread.is_alive():
-#          logging.warning("Waiting for listener thread to stop after unhook...")
-#          # keyboard._listener.stop() # This might be internal/unstable API
-#          # If thread doesn't stop naturally after unhook, join might hang
-#          _listener_thread.join(timeout=0.5) # Wait briefly for thread to exit
-#          if _listener_thread.is_alive():
-#              logging.error("Listener thread did not stop cleanly. Cannot change hotkey dynamically.")
-#              # Attempt to re-register the original if possible? Risky.
-#              # setup_hotkey(_current_hotkey_str, callback_func) # Try to restore old one
-#              return False # Indicate failure
-#          else:
-#              logging.info("Listener thread stopped.")
-#              _listener_thread = None # Clear stopped thread
-#
-#     # If thread stopped or wasn't running, setup the new one
-#     logging.debug("Setting up new hotkey listener...")
-#     setup_hotkey(new_hotkey_str, callback_func)
-#     return True # Indicate success (or at least attempt)
+def update_active_hotkey(new_hotkey_str):
+    """Dynamically updates the hotkey string the listener checks for."""
+    global _current_hotkey_str, _hotkey_keys
+    if keyboard is None: return False
+    if not _hook_active:
+        logging.warning("Cannot update hotkey: Listener is not active.")
+        return False # Or should we just update the variable anyway?
+
+    logging.info(f"Updating active hotkey to: '{new_hotkey_str}'")
+    with _hotkey_lock:
+        _current_hotkey_str = new_hotkey_str
+        _hotkey_keys = _parse_hotkey_string(new_hotkey_str)
+        # Clear potentially stale pressed keys when hotkey changes
+        # This prevents accidental triggering if modifiers were held during change
+        _pressed_keys.clear()
+    logging.debug(f"Active hotkey keys set to: {_hotkey_keys}")
+    return True

@@ -28,7 +28,7 @@ except Exception as e:
 # --- Import GUI component after setting app details ---
 try:
     # Import the main window class from its new location
-    from src.gui.translucent_box import TranslucentBox
+    from src.gui.main_window import MainWindow
 except ImportError as e:
      logging.basicConfig(level="CRITICAL", format='%(levelname)s: %(message)s')
      logging.critical(f"Failed to import GUI component (TranslucentBox): {e}. Make sure src/gui/translucent_box.py exists.")
@@ -76,7 +76,7 @@ def run_application():
     try:
         # Create the main window instance
         # Initialization within TranslucentBox handles loading managers, settings, etc.
-        window = TranslucentBox()
+        window = MainWindow()
         window.show() # Ensure window is shown (might be redundant if show() is in __init__)
 
         # Enter the Qt event loop
