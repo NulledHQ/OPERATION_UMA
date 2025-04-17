@@ -4,114 +4,92 @@ A desktop application for Windows (and potentially other platforms with adjustme
 
 ## Features
 
-* **Screen Region Capture:** Define a specific area on your screen for OCR by positioning the application window over it.
-* **OCR:** Supports multiple OCR backends:
-    * Google Cloud Vision API (Requires API setup) [cite: src/config.py, src/core/ocr_worker.py]
-    * OCR.space API (Requires API Key) [cite: src/config.py, src/core/ocr_worker.py]
+* **Screen Region Capture:** Define a specific area on your screen for OCR.
+* **OCR Engine Support:** Uses Google Cloud Vision API or OCR.space for text recognition (configurable).
 * **Translation:** Supports multiple translation backends:
-    * Google Cloud Translation API v3 (Requires API setup) [cite: src/config.py, src/translation_engines/google_cloud_v3_engine.py]
-    * DeepL API (Free or Pro) (Requires API Key) [cite: src/config.py, src/translation_engines/deepl_free_engine.py]
-    * Google Translate (Unofficial via `googletrans` library - may be unstable) [cite: src/config.py, src/translation_engines/googletrans_engine.py]
-* **Configurable:** [cite: src/gui/settings_dialog.py, src/config.py]
-    * Select OCR provider (Google Cloud Vision or OCR.space).
-    * Select OCR language (for OCR.space).
-    * Select the desired translation engine.
+    * Google Cloud Translation API v3 (Requires API setup)
+    * DeepL API (Free or Pro) (Requires API Key)
+    * Google Translate (Unofficial via `googletrans` library - may be unstable)
+* **Configurable:**
+    * Select OCR provider and specific OCR language (for OCR.space).
     * Select target language for translation.
+    * Choose the desired translation engine.
     * Adjust OCR refresh interval for "Live Mode".
-    * Customize display font and text area background opacity.
+    * Customize display font and background opacity.
+    * Set a global hotkey for single captures.
     * Lock window position and size.
-* **User Interface:** [cite: src/gui/translucent_box.py]
+* **User Interface:**
     * Translucent, always-on-top window displaying OCR and translation results.
     * Resizable and movable window (unless locked).
-    * Settings dialog (⚙️) for easy configuration.
-* **Global Hotkey:** Trigger OCR/Translate capture using a configurable hotkey (default: `Ctrl+Shift+G`) [cite: src/config.py, src/core/hotkey_manager.py].
-* **Live Mode:** Toggle automatic periodic OCR/Translation via the Settings dialog [cite: src/gui/translucent_box.py, src/gui/settings_dialog.py].
-* **History:** Stores recent OCR/translation pairs, allowing export to CSV and clearing via the Settings dialog [cite: src/core/history_manager.py, src/gui/settings_dialog.py].
-* **Modular Design:** OCR providers and translation engines are separated for easier maintenance and extension.
+    * Settings dialog for easy configuration.
+    * Dedicated checkbox to enable/disable Live Mode.
+* **History:** Stores recent OCR/translation pairs, allowing export to CSV and clearing.
+* **Modular Design:** Core components have been refactored into separate handlers for improved structure and maintainability.
 
 ## Requirements
 
 * Python 3.8+
-* The following libraries (see `requirements.txt` [cite: 1]):
-    ```
-    PyQt5==5.15.10
-    mss==9.0.1
-    Pillow==10.3.0
-    keyboard==0.13.5
-    google-cloud-vision==3.7.2
-    google-cloud-translate==3.15.1
-    google-auth==2.29.0
-    googletrans==4.0.0rc1
-    deepl==1.18.1
-    ```
+* External Libraries (see `requirements.txt`)
 
 ## Setup & Installation
 
 1.  **Clone or Download:** Get the project files.
-2.  **Navigate to Project Root:** Open a terminal/command prompt in the project folder.
+2.  **Navigate to Project Root:** Open terminal/command prompt to the project folder.
 3.  **Create Virtual Environment (Recommended):**
     ```bash
     python -m venv venv
-    # Windows: .\venv\Scripts\activate
-    # macOS/Linux: source venv/bin/activate
+    # Activate (Windows): .\venv\Scripts\activate
+    # Activate (macOS/Linux): source venv/bin/activate
     ```
 4.  **Install Dependencies:**
     ```bash
-    pip install -r requirements.txt [cite: 1]
+    pip install -r requirements.txt
     ```
-5.  **API Keys / Credentials:**
-    * **Google Cloud (Conditional):**
-        * If using Google Cloud Vision (OCR) OR Google Cloud Translate (Translation):
-            * You need a Google Cloud Platform project with the **Cloud Vision API** and/or **Cloud Translation API** enabled.
-            * Create a **Service Account** and download its **JSON key file**.
-    * **OCR.space (Conditional):**
-        * If using OCR.space (OCR): Get a free API key from [ocr.space/OCRAPI](https://ocr.space/OCRAPI).
-    * **DeepL (Conditional):**
-        * If using DeepL (Translation): Get an Authentication Key (Free or Pro) from your [deepl.com](https://www.deepl.com/) account.
+5.  **Google Cloud Credentials (Required for Google OCR/Translate):**
+    * Need a GCP project with **Cloud Vision API** and/or **Cloud Translation API** enabled.
+    * Create a Service Account and download its JSON key file.
+6.  **OCR.space API Key (Optional - Required for OCR.space):**
+    * Get a free or pro API key from [ocr.space/OCRAPI](https://ocr.space/OCRAPI).
+7.  **DeepL API Key (Optional - Required for DeepL Engine):**
+    * Get a Free or Pro API key from your account on [deepl.com](https://www.deepl.com/).
 
 ## Configuration
 
-1.  **Run the application:** `python main.py`
-2.  **Open Settings:** Click the gear icon (⚙️).
-3.  **Select OCR Provider:** Choose between Google Cloud Vision and OCR.space [cite: src/gui/settings_dialog.py].
-4.  **Provide OCR Credentials/Key:**
-    * If using **Google Cloud Vision**: Click "Browse..." next to "Google Credentials" and select your JSON key file [cite: src/gui/settings_dialog.py].
-    * If using **OCR.space**: Enter your OCR.space API key in the corresponding field. Select the expected **OCR Language** from the dropdown [cite: src/gui/settings_dialog.py].
-5.  **Select Translation Engine:** Choose your preferred engine [cite: src/gui/settings_dialog.py].
-6.  **Provide Translation Credentials/Key:**
-    * If using **Google Cloud Translate**: Ensure you have provided the Google Credentials JSON key file (Step 4a) [cite: src/gui/settings_dialog.py].
-    * If using **DeepL**: Enter your DeepL API Key in the corresponding field [cite: src/gui/settings_dialog.py].
-    * **Googletrans (Unofficial)** requires no key here.
-7.  **Target Language:** Choose the language you want the text translated into [cite: src/gui/settings_dialog.py].
-8.  **Other Settings:** Adjust font, text background opacity, live mode interval, and window lock as desired [cite: src/gui/settings_dialog.py].
-9.  **Click OK** to save. Settings are stored using QSettings [cite: src/core/settings_manager.py].
+1.  **Run:** `python main.py`
+2.  **Open Settings (⚙️):**
+3.  **Credentials/API Keys:**
+    * If using Google Cloud services, browse and select your JSON key file.
+    * If using OCR.space, enter your API key.
+    * If using DeepL, enter your API key.
+4.  **OCR Provider:** Select Google Cloud Vision or OCR.space. If using OCR.space, select the appropriate OCR Language.
+5.  **Translation Engine:** Select your preferred engine.
+6.  **Target Language:** Choose the language for translation results.
+7.  **Other Settings:** Adjust font, opacity, live interval, lock state, hotkey.
+8.  **Click OK** to save.
 
 ## Usage
 
-1.  **Start the Application:**
-    ```bash
-    python main.py
-    ```
-2.  **Position and Resize:** Drag the top area to move, drag edges to resize (if not locked) [cite: src/gui/translucent_box.py].
-3.  **Capture Text:**
-    * Press the global hotkey (`Ctrl+Shift+G` by default) [cite: src/gui/translucent_box.py].
-    * Alternatively, click the "Grab Text" button [cite: src/gui/translucent_box.py].
-    * The application captures the region under the text display area, performs OCR using the selected provider, and translates using the selected engine [cite: src/core/ocr_worker.py, src/gui/translucent_box.py].
+1.  **Start:** `python main.py`
+2.  **Position/Resize:** Drag top bar to move, drag edges to resize (if not locked).
+3.  **Single Capture:**
+    * Press the global hotkey (default defined in `config.py`).
+    * Alternatively, click the "Grab Text" button (ensure the "Live" checkbox is **unchecked**).
 4.  **Live Mode:**
-    * Toggle via the Settings dialog (⚙️) [cite: src/gui/settings_dialog.py].
-    * Automatically performs "Grab Text" at the configured interval [cite: src/gui/translucent_box.py].
-5.  **View History / Settings:** Use the Settings dialog (⚙️) to Export/Clear history and change configuration [cite: src/gui/settings_dialog.py].
+    * **Enable:** Check the "Live" checkbox next to the "Grab Text" button. Prerequisites (API keys/credentials) must be met.
+    * **Start Capture:** Click the main action button (which should now read "Start Live"). The checkbox label will change (e.g., "Live ●") to indicate activity.
+    * **Stop Capture:** Click the main action button again (which should read "Stop Live").
+    * **Disable:** Uncheck the "Live" checkbox. This also stops active capture.
+5.  **View History / Settings:** Use the Settings dialog (⚙️).
 
 ## Translation Engines Notes
 
-* **Google Cloud API v3:** Reliable, requires Google Cloud setup. Uses the JSON credentials file for authentication. Recommended for stability [cite: src/translation_engines/google_cloud_v3_engine.py].
-* **DeepL Free/Pro:** High-quality translation, requires a DeepL API key. Free tier has usage limits [cite: src/translation_engines/deepl_free_engine.py].
-* **Google Translate (Unofficial):** Uses the `googletrans` library. **Can be unstable and break without notice** if Google changes their web interface. Does not require an API key [cite: src/translation_engines/googletrans_engine.py].
+* **Google Cloud API v3:** Reliable, requires Google Cloud setup/credentials.
+* **DeepL Free/Pro:** High-quality, requires a DeepL API key.
+* **Google Translate (Unofficial):** Uses `googletrans`, **can be unstable/break easily**. No API key needed.
 
 ## Troubleshooting
 
-* **`googletrans` Errors:** If the unofficial engine fails (e.g., `JSONDecodeError`, network errors), it might be temporarily blocked or broken. Try again later or switch engines. Ensure you installed `googletrans==4.0.0rc1` [cite: 1, src/translation_engines/googletrans_engine.py].
-* **API Key/Credential Errors (Google Cloud/DeepL/OCR.space):** Double-check that the correct API key/credentials file is selected in settings and that the corresponding APIs (Vision, Translate) are enabled in your cloud project. Verify the service account has appropriate roles (e.g., Cloud Vision AI User, Cloud Translation API User). Check for quota limits [cite: src/gui/settings_dialog.py].
-* **OCR Fails (Google Vision):** Ensure the Cloud Vision API is enabled and the credentials file is valid and selected correctly. Check network connection [cite: src/core/ocr_worker.py].
-* **OCR Fails (OCR.space):** Ensure the API key is correct and you have selected an appropriate OCR language in settings. Check network connection and OCR.space service status [cite: src/core/ocr_worker.py].
-* **Hotkey Not Working:** Ensure the `keyboard` library installed correctly. May require elevated permissions on some systems (run as administrator - use with caution). Check for conflicts with other global hotkeys [cite: src/core/hotkey_manager.py, 1].
+* **`googletrans` Errors:** Likely blocked by Google or API changes. Try later or switch engines.
+* **API Key/Credential Errors:** Double-check keys/file paths in settings and ensure APIs are enabled in the respective cloud consoles. Check quotas.
+* **Hotkey Not Working:** Ensure `keyboard` library installed, check for conflicts with other apps, potentially check permissions.
+* **OCR Fails:** Check selected OCR provider's requirements (API Key for OCR.space, valid credentials/API enabled for Google Vision). Check network.
