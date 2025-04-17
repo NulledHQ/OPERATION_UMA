@@ -1,4 +1,4 @@
-# Operation UMA Translator
+# UMA OCR
 
 A desktop application for Windows (and potentially other platforms with adjustments) that captures a selected screen region, performs Optical Character Recognition (OCR), and translates the recognized text using various translation engines.
 
